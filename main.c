@@ -51,6 +51,13 @@ double addendum(size_t ind){
     return 1.0 / denum;
 }
 
+size_t maxIterCntArray(size_t thread_cnt){
+    size_t max_iter_cnt = 0;
+    for (int i = 0; i < thread_cnt; ++i)
+        if (iter_cnt_arr[i] > max_iter_cnt)
+            max_iter_cnt = iter_cnt_arr[i];
+}
+
 void *routine(void *data){
     Context *cntx = ((Context*)(data));
 
@@ -61,7 +68,6 @@ void *routine(void *data){
         each thread uses (thread_id + k * thread_cnt)th
         numbers of row
     */
-
     size_t iter_cnt = 0;
     size_t iter_cnt_check = 0;
     while(1){
@@ -71,10 +77,7 @@ void *routine(void *data){
                 iter_cnt_arr[cntx->thread_id] = iter_cnt;
                 pthread_barrier_wait(cntx->barrier);
 
-                size_t max_iter_cnt = 0;
-                for (int i = 0; i < cntx->thread_cnt; ++i)
-                    if (iter_cnt_arr[i] > max_iter_cnt)
-                        max_iter_cnt = iter_cnt_arr[i];
+                size_t max_iter_cnt = maxIterCntArray(cntx->thread_cnt);
 
                 for (int i = iter_cnt; i < max_iter_cnt; ++i){
                     sum += addendum(ind);
