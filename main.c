@@ -25,6 +25,7 @@ void exitWithFailure(const char *msg, int errcode){
 }
 
 char is_intr = 0;
+size_t *iter_cnt_arr = NULL;
 
 void sigcatch(){
     is_intr = 1;
@@ -39,6 +40,7 @@ typedef struct Context{
             /* thread identifier */
             thread_id;
     double *res;
+    pthread_barrier_t *barrier;
 } Context;
 
 double addendum(size_t ind){
@@ -65,10 +67,16 @@ void *routine(void *data){
     while(1){
         if (iter_cnt_check == ITER_CNT_CHECK){
             if (is_intr){
-                /* round up */
-                size_t final_iter = ((iter_cnt + ITER_FAULT - 1) / ITER_FAULT) * ITER_FAULT;
                 
-                for (size_t i = iter_cnt; i < final_iter; ++i){
+                iter_cnt_arr[cntx->thread_id] = iter_cnt;
+                pthread_barrier_wait(cntx->barrier);
+
+                size_t max_iter_cnt = 0;
+                for (int i = 0; i < cntx->thread_cnt; ++i)
+                    if (iter_cnt_arr[i] > max_iter_cnt)
+                        max_iter_cnt = iter_cnt_arr[i];
+
+                for (int i = iter_cnt; i < max_iter_cnt; ++i){
                     sum += addendum(ind);
                     ind += cntx->thread_cnt;
                 }
@@ -87,58 +95,110 @@ void *routine(void *data){
     }
 }
 
-int main(int argc, char **argv){
-    char *endptr;
-    errno = SUCCESS_CODE;
-    const size_t thread_cnt = argc >= MIN_ARG_CNT ? strtol(argv[1], &endptr, 10) : 4;
-    if (errno != SUCCESS_CODE)
-        exitWithFailure("main", EINVAL);
+int init(
+    pthread_t **pid,
+    Context **cntx,
+    pthread_barrier_t *barrier,
+    size_t thread_cnt){
+    
+    if (pid == NULL || cntx == NULL || barrier == NULL)
+        return EINVAL;
 
     errno = SUCCESS_CODE;
     signal(SIGINT, sigcatch);
     if (errno != SUCCESS_CODE)
         exitWithFailure("main:", errno);
-    
-    pthread_t *pid;
-    Context *cntx;
 
-    pid = (pthread_t*)malloc(sizeof(pthread_t) * thread_cnt);
-    if (pid == NULL)
-        exitWithFailure("main", ENOMEM);
-    cntx = (Context*)malloc(sizeof(Context) * thread_cnt);
+    *pid = (pthread_t*)malloc(sizeof(pthread_t) * thread_cnt);
+    if (*pid == NULL)
+        return ENOMEM;
+    *cntx = (Context*)malloc(sizeof(Context) * thread_cnt);
     if (cntx == NULL)
-        exitWithFailure("main", ENOMEM);
+        return ENOMEM;
+    iter_cnt_arr = (size_t*)malloc(sizeof(size_t) * thread_cnt);
+    if (iter_cnt_arr == NULL)
+        return ENOMEM;
+    int err = pthread_barrier_init(barrier, NULL, thread_cnt);
+    if (err != SUCCESS_CODE)
+        return err;
 
     for (int i = 0; i < thread_cnt; ++i){
-        cntx[i].thread_cnt = thread_cnt;
-        cntx[i].thread_id = i;
-        cntx[i].res = (double*)malloc(sizeof(double));
-        if (cntx[i].res == NULL)
-            exitWithFailure("main", ENOMEM);
+        (*(cntx) + i)->thread_cnt = thread_cnt;
+        (*(cntx) + i)->thread_id = i;
+        (*(cntx) + i)->barrier = barrier;
+        (*(cntx) + i)->res = (double*)malloc(sizeof(double));
+        if ((*(cntx) + i)->res == NULL)
+            return ENOMEM;
 
-        int err = pthread_create(&pid[i], NULL, routine, (void*)(&cntx[i]));
+        int err = pthread_create(*pid + i, NULL, routine, (void*)(*cntx + i));
         if (err != SUCCESS_CODE)
-            exitWithFailure("main", err);
+            return err;
     }
+
+    return SUCCESS_CODE;
+}
+
+double gatherPartialSums(
+    pthread_t *pid, 
+    Context *cntx, 
+    size_t thread_cnt,
+    double *result){
+
+    if (pid == NULL || cntx == NULL || result == NULL)
+        return EINVAL;
 
     double sum = 0.0;
     for (int i = 0; i < thread_cnt; ++i){
         /* wait for threads to terminate */
         int err = pthread_join(pid[i], NULL);
         if (err != SUCCESS_CODE)
-            exitWithFailure("main", err);
+            return err;
 
         sum += *(cntx[i].res);
         /* release memory*/
         free(cntx[i].res);
     }
+    
+    *result = sum;
+    return SUCCESS_CODE;
+}
 
-    /* release memory again */
+int releaseResources(
+    pthread_t *pid, 
+    Context *cntx){
+    
+    if (pid == NULL || cntx == NULL || iter_cnt_arr == NULL)
+        return EINVAL;
+
     free(pid);
     free(cntx);
+    free(iter_cnt_arr);
+}
 
-    sum *= 4.0;
-    printf("%.10f\n", sum);
+int main(int argc, char **argv){
+    char *endptr;
+    errno = SUCCESS_CODE;
+    const size_t thread_cnt = 
+        argc >= MIN_ARG_CNT ? strtoll(argv[1], &endptr, 10) : 4;
+    if (errno != SUCCESS_CODE || strtoll(argv[1], &endptr, 10) < 0)
+        exitWithFailure("main", EINVAL);
 
+    pthread_t *pid;
+    Context *cntx;
+    pthread_barrier_t barrier;
+
+    int err = init(&pid, &cntx, &barrier, thread_cnt);
+    if (err != SUCCESS_CODE)
+        exitWithFailure("main:", err);
+
+    double sum;
+    err = gatherPartialSums(pid, cntx, thread_cnt, &sum);
+    if (err != SUCCESS_CODE)
+        exitWithFailure("main", err);
+
+    /* release memory again */
+    releaseResources(pid, cntx);
+
+    printf("%.10f\n", sum * 4.0);
     return 0;
 }
