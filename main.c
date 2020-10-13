@@ -7,16 +7,12 @@
 #include <signal.h>
 
 #ifndef ITER_CNT_CHECK
-#define ITER_CNT_CHECK (size_t)(2 * 1e8)
+#define ITER_CNT_CHECK (size_t)(2 * 1e6)
 #endif
 
 #define ERROR_CODE -1
 #define SUCCESS_CODE 0
 #define MIN_ARG_CNT 2
-
-#ifndef ITER_FAULT
-#define ITER_FAULT (size_t)(2 * 1e8)
-#endif
 
 void exitWithFailure(const char *msg, int errcode){
     errno = errcode;
@@ -79,7 +75,7 @@ void *routine(void *data){
 
                 size_t max_iter_cnt = maxIterCntArray(cntx->thread_cnt);
 
-                for (int i = iter_cnt; i < max_iter_cnt; ++i){
+                while (ind < max_iter_cnt){
                     sum += addendum(ind);
                     ind += cntx->thread_cnt;
                 }
@@ -168,14 +164,21 @@ double gatherPartialSums(
 
 int releaseResources(
     pthread_t *pid, 
-    Context *cntx){
+    Context *cntx,
+    pthread_barrier_t *barrier){
     
-    if (pid == NULL || cntx == NULL || iter_cnt_arr == NULL)
+    if (pid == NULL || cntx == NULL || 
+        iter_cnt_arr == NULL || barrier == NULL)
         return EINVAL;
 
     free(pid);
     free(cntx);
     free(iter_cnt_arr);
+    int err = pthread_barrier_destroy(barrier);
+    if (err != SUCCESS_CODE)
+        return err;
+
+    return SUCCESS_CODE;
 }
 
 int main(int argc, char **argv){
@@ -192,7 +195,7 @@ int main(int argc, char **argv){
 
     int err = init(&pid, &cntx, &barrier, thread_cnt);
     if (err != SUCCESS_CODE)
-        exitWithFailure("main:", err);
+        exitWithFailure("main", err);
 
     double sum;
     err = gatherPartialSums(pid, cntx, thread_cnt, &sum);
@@ -200,7 +203,9 @@ int main(int argc, char **argv){
         exitWithFailure("main", err);
 
     /* release memory again */
-    releaseResources(pid, cntx);
+    err = releaseResources(pid, cntx, &barrier);
+    if (err != SUCCESS_CODE)
+        exitWithFailure("main", err);
 
     printf("%.10f\n", sum * 4.0);
     return 0;
