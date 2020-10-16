@@ -7,7 +7,7 @@
 #include <signal.h>
 
 #ifndef ITER_CNT_CHECK
-#define ITER_CNT_CHECK (size_t)(2 * 1e6)
+#define ITER_CNT_CHECK (size_t)(1e3)
 #endif
 
 #define ERROR_CODE -1
@@ -202,7 +202,7 @@ int main(int argc, char **argv){
     if (err != SUCCESS_CODE)
         exitWithFailure("main", err);
 
-    /* release memory again */
+    /* release memory */
     err = releaseResources(pid, cntx, &barrier);
     if (err != SUCCESS_CODE)
         exitWithFailure("main", err);
