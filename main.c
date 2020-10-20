@@ -21,6 +21,7 @@ void exitWithFailure(const char *msg, int errcode){
 }
 
 char is_intr = 0;
+char has_no_intr = 0;
 size_t *iter_cnt_arr = NULL;
 
 void sigcatch(){
@@ -52,6 +53,8 @@ size_t maxIterCntArray(size_t thread_cnt){
     for (int i = 0; i < thread_cnt; ++i)
         if (iter_cnt_arr[i] > max_iter_cnt)
             max_iter_cnt = iter_cnt_arr[i];
+
+    return max_iter_cnt;
 }
 
 void *routine(void *data){
@@ -68,16 +71,20 @@ void *routine(void *data){
     size_t iter_cnt_check = 0;
     while(1){
         if (iter_cnt_check == ITER_CNT_CHECK){
-            if (is_intr){
-                
+            if (!is_intr)
+                has_no_intr = 1;
+            pthread_barrier_wait(cntx->barrier);
+
+            if (!has_no_intr){
                 iter_cnt_arr[cntx->thread_id] = iter_cnt;
                 pthread_barrier_wait(cntx->barrier);
 
                 size_t max_iter_cnt = maxIterCntArray(cntx->thread_cnt);
 
-                while (ind < max_iter_cnt){
+                while (iter_cnt < max_iter_cnt){
                     sum += addendum(ind);
                     ind += cntx->thread_cnt;
+                    ++iter_cnt;
                 }
 
                 *(cntx->res) = sum;
@@ -85,6 +92,10 @@ void *routine(void *data){
             }
 
             iter_cnt_check = 0;
+            
+            pthread_barrier_wait(cntx->barrier);
+            has_no_intr = 0;
+            pthread_barrier_wait(cntx->barrier);
         }
 
         sum += addendum(ind);
@@ -106,7 +117,7 @@ int init(
     errno = SUCCESS_CODE;
     signal(SIGINT, sigcatch);
     if (errno != SUCCESS_CODE)
-        exitWithFailure("main:", errno);
+        return errno;
 
     *pid = (pthread_t*)malloc(sizeof(pthread_t) * thread_cnt);
     if (*pid == NULL)
@@ -154,8 +165,6 @@ double gatherPartialSums(
             return err;
 
         sum += *(cntx[i].res);
-        /* release memory*/
-        free(cntx[i].res);
     }
     
     *result = sum;
@@ -170,6 +179,10 @@ int releaseResources(
     if (pid == NULL || cntx == NULL || 
         iter_cnt_arr == NULL || barrier == NULL)
         return EINVAL;
+
+    size_t thread_cnt = cntx[0].thread_cnt;
+    for (size_t i = 0; i < thread_cnt; ++i)
+        free(cntx[i].res);
 
     free(pid);
     free(cntx);
