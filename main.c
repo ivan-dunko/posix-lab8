@@ -73,11 +73,15 @@ void *routine(void *data){
         if (iter_cnt_check == ITER_CNT_CHECK){
             if (!is_intr)
                 has_no_intr = 1;
-            pthread_barrier_wait(cntx->barrier);
+            int err = pthread_barrier_wait(cntx->barrier);
+            if (err != SUCCESS_CODE && err != PTHREAD_BARRIER_SERIAL_THREAD)
+                return err;
 
             if (!has_no_intr){
                 iter_cnt_arr[cntx->thread_id] = iter_cnt;
-                pthread_barrier_wait(cntx->barrier);
+                err = pthread_barrier_wait(cntx->barrier);
+                if (err != SUCCESS_CODE && err != PTHREAD_BARRIER_SERIAL_THREAD)
+                    return err;
 
                 size_t max_iter_cnt = maxIterCntArray(cntx->thread_cnt);
 
@@ -92,10 +96,14 @@ void *routine(void *data){
             }
 
             iter_cnt_check = 0;
-            
-            pthread_barrier_wait(cntx->barrier);
+
+            err = pthread_barrier_wait(cntx->barrier);
+            if (err != SUCCESS_CODE && err != PTHREAD_BARRIER_SERIAL_THREAD)
+                    return err;
             has_no_intr = 0;
-            pthread_barrier_wait(cntx->barrier);
+            err = pthread_barrier_wait(cntx->barrier);
+            if (err != SUCCESS_CODE && err != PTHREAD_BARRIER_SERIAL_THREAD)
+                    return err;
         }
 
         sum += addendum(ind);
@@ -207,13 +215,17 @@ int main(int argc, char **argv){
     pthread_barrier_t barrier;
 
     int err = init(&pid, &cntx, &barrier, thread_cnt);
-    if (err != SUCCESS_CODE)
+    if (err != SUCCESS_CODE){
+        releaseResources(pid, cntx, &barrier);
         exitWithFailure("main", err);
+    }
 
     double sum;
     err = gatherPartialSums(pid, cntx, thread_cnt, &sum);
-    if (err != SUCCESS_CODE)
+    if (err != SUCCESS_CODE){
+        releaseResources(pid, cntx, &barrier);
         exitWithFailure("main", err);
+    }
 
     /* release memory */
     err = releaseResources(pid, cntx, &barrier);
